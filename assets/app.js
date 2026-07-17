@@ -189,7 +189,7 @@
     { id: "morphology", label: "Morphology", icon: "⚙" },
     { id: "quiz", label: "Quiz", icon: "✎" },
     { id: "flashcards", label: "Flashcards", icon: "▤" },
-    { id: "add", label: "Add Word", icon: "＋" },
+    { id: "add", label: "Add Content", icon: "＋" },
     { id: "stats", label: "Progress", icon: "▲" }
   ];
 
@@ -369,31 +369,53 @@
       if (exState.origin !== "all" && root.origin !== exState.origin) return "";
       const words = root.words.filter(wordMatchesFilters);
       const searchWords = words.filter((w) => !q || (w.word + " " + w.meaning + " " + root.label + " " + root.meaning).toLowerCase().includes(q));
-      if (searchWords.length === 0) return "";
+      
+      const isEmptyRoot = root.words.length === 0;
+      let shouldShowEmpty = false;
+      if (isEmptyRoot) {
+        const matchesSearch = !q || (root.label + " " + root.meaning).toLowerCase().includes(q);
+        const matchesStatus = exState.status === "all" || exState.status === "new";
+        const matchesBookmarked = !exState.bookmarked;
+        shouldShowEmpty = matchesSearch && matchesStatus && matchesBookmarked;
+      }
+
+      if (searchWords.length === 0 && !shouldShowEmpty) return "";
       shownRoots++; shownWords += searchWords.length;
-      const mastered = root.words.filter((w) => wordStatus(wordKey(w)) === "mastered").length;
+      const mastered = root.words.length ? root.words.filter((w) => wordStatus(wordKey(w)) === "mastered").length : 0;
       const open = !!q || exState.status !== "all" || exState.bookmarked;
-      const chips = searchWords.map((w) => {
-        const key = wordKey(w);
-        const star = wordState(key).bookmarked ? " ★" : "";
-        const matchCls = q && (w.word.toLowerCase().includes(q)) ? " match" : "";
-        const mine = w.custom ? " chip-mine" : "";
-        return `<button class="chip${matchCls}${mine}" data-word="${esc(key)}" data-root="${esc(root.id)}" ${w.custom ? 'title="Added by you"' : ""}>
-          <span class="status-dot st-${wordStatus(key)}"></span>${esc(w.word)}${star}${w.custom ? ' <span class="mine-mark">✎</span>' : ""}</button>`;
-      }).join("");
+      
+      let chips = "";
+      if (isEmptyRoot) {
+        chips = `<div class="empty-note" style="padding:.5rem 0;text-align:left;font-size:0.85rem">No words in this root yet.</div>`;
+      } else {
+        chips = searchWords.map((w) => {
+          const key = wordKey(w);
+          const star = wordState(key).bookmarked ? " ★" : "";
+          const matchCls = q && (w.word.toLowerCase().includes(q)) ? " match" : "";
+          const mine = w.custom ? " chip-mine" : "";
+          return `<button class="chip${matchCls}${mine}" data-word="${esc(key)}" data-root="${esc(root.id)}" ${w.custom ? 'title="Added by you"' : ""}>
+            <span class="status-dot st-${wordStatus(key)}"></span>${esc(w.word)}${star}${w.custom ? ' <span class="mine-mark">✎</span>' : ""}</button>`;
+        }).join("");
+      }
+      
       return `<div class="root-card ${oc(root.origin)} ${open ? "open" : ""}" data-root="${esc(root.id)}">
         <button class="root-head">
           <span class="root-title"><span class="root-label">${esc(root.label)}</span>
             <span class="root-gloss">“${esc(root.meaning)}”</span></span>
           <span class="root-meta">
-            <span class="root-progress" title="${mastered}/${root.words.length} mastered"><i style="width:${bar(mastered, root.words.length)}%"></i></span>
+            <span class="root-progress" title="${mastered}/${root.words.length} mastered"><i style="width:${root.words.length ? bar(mastered, root.words.length) : 0}%"></i></span>
             <span class="badge">${cap(root.origin)}</span>
-            <span class="count-badge">${searchWords.length}</span>
+            <span class="count-badge">${root.words.length}</span>
             <span class="chevron">▸</span>
           </span>
         </button>
         <div class="root-body"><div class="chips">${chips}</div>
-          <div class="detail empty" data-detail="${esc(root.id)}">Tap a word above to see its meaning, an example, and related words.</div>
+          <div class="detail empty" data-detail="${esc(root.id)}">
+            ${isEmptyRoot ? `No words added to this root yet.
+            <div style="margin-top:.6rem">
+              <button class="mini-btn on-good" data-add-to-root="${esc(root.id)}">＋ Add a word to this root</button>
+            </div>` : 'Tap a word above to see its meaning, an example, and related words.'}
+          </div>
         </div>
       </div>`;
     }).join("") || `<div class="empty-note">No words match these filters.</div>`;
@@ -404,7 +426,16 @@
     list.querySelectorAll(".chip").forEach((ch) => ch.addEventListener("click", () => selectWord(ch.dataset.root, ch.dataset.word)));
     list.addEventListener("click", (e) => {
       const link = e.target.closest("[data-goto]"); if (link) { e.stopPropagation(); openWord(link.dataset.goto); return; }
-      const act = e.target.closest("[data-act]"); if (act) { e.stopPropagation(); wordAction(act.dataset.act, act.dataset.word); }
+      const act = e.target.closest("[data-act]"); if (act) { e.stopPropagation(); wordAction(act.dataset.act, act.dataset.word); return; }
+      const addToRoot = e.target.closest("[data-add-to-root]");
+      if (addToRoot) {
+        e.stopPropagation();
+        preselectedRootId = addToRoot.dataset.addToRoot;
+        addViewMode = "word";
+        addDraft = null;
+        rootDraft = null;
+        location.hash = "#/add";
+      }
     });
   }
 
@@ -701,8 +732,11 @@
     $("#fShuffle").addEventListener("click", () => { flash.cards = shuffle(flash.cards); flash.i = 0; flash.flipped = false; route(); toast("Shuffled", "⤨"); });
   }
 
-  // ---- Add Word ----
+  // ---- Add Word / Root ----
   let addDraft = null; // when editing, holds the word being edited (by original key)
+  let rootDraft = null; // when editing, holds the root being edited (by original key/id)
+  let addViewMode = "word"; // "word" | "root"
+  let preselectedRootId = null; // sets the default selected root when adding a word
 
   const POS_OPTIONS = [
     { value: "", label: "— none —" },
@@ -766,7 +800,7 @@
       search.addEventListener("click", (e) => e.stopPropagation());
       search.addEventListener("input", () => filterDDOpts(dd, search.value));
     }
-    dd.querySelectorAll(".dd-opt").forEach((o) => o.addEventListener("click", () => {
+dd.querySelectorAll(".dd-opt").forEach((o) => o.addEventListener("click", () => {
       dd.dataset.value = o.dataset.val;
       dd.querySelectorAll(".dd-opt").forEach((x) => { x.classList.remove("sel"); const c = x.querySelector(".dd-check"); if (c) c.remove(); });
       o.classList.add("sel");
@@ -779,92 +813,183 @@
 
   VIEWS.add = function (view) {
     view.className = "view";
-    const d = addDraft || {};
-    const editing = !!addDraft;
-    const rootOptions = [{ value: "", label: "— choose a root —" }]
-      .concat(content.roots.map((r) => ({ value: r.id, label: r.label + " — " + r.meaning })))
-      .concat([{ value: "__new__", label: "＋ Create a new root…" }]);
-    let related = (d.related || []).slice();
-    const mine = (S.custom.words || []).slice().reverse();
+    
+    // Check if we have preselected a root from Explore view
+    if (preselectedRootId) {
+      addViewMode = "word";
+      addDraft = null;
+      rootDraft = null;
+    }
 
-    view.innerHTML = `
-      <div class="view-head"><h1>${editing ? "Edit word" : "Add a word"}</h1>
-        <p>${editing ? "Update this word you added." : "Add your own word, attach it to a root, and link it to related words. Saved in your browser; back it up from Progress → Export."}</p></div>
-      <div class="grid cols-2" style="align-items:start">
-        <div class="card">
-          <div class="field"><label>Word *</label><input class="inp" id="fWord" value="${esc(d.word || "")}" autocomplete="off" placeholder="e.g. cardiologist"></div>
-          <div class="field"><label>Part of speech</label>${ddSingle("pos", POS_OPTIONS, d.pos || "", "— none —")}</div>
-          <div class="field"><label>Meaning *</label><textarea class="inp" id="fMean" rows="2" placeholder="a short, precise definition">${esc(d.meaning || "")}</textarea></div>
-          <div class="field"><label>Example sentence</label><textarea class="inp" id="fEx" rows="2" placeholder="a natural sentence using the word">${esc(d.example || "")}</textarea></div>
-          <div class="field"><label>Contrast / nuance</label><textarea class="inp" id="fContrast" rows="2" placeholder="how it differs from a near-synonym (optional)">${esc(d.contrast || "")}</textarea></div>
+    const mode = addViewMode; // "word" or "root"
+    let html = "";
+    
+    // Header with mode buttons
+    html += `
+      <div class="view-head">
+        <h1>Add or Edit Content</h1>
+        <p>Manage your custom roots and vocabulary words here.</p>
+      </div>
+      
+      <div class="pill-row" style="margin-bottom: 1.2rem">
+        <button class="pill ${mode === 'word' ? 'active' : ''}" id="modeWordBtn">Add Word</button>
+        <button class="pill ${mode === 'root' ? 'active' : ''}" id="modeRootBtn">Add Root</button>
+      </div>
+    `;
+    
+    if (mode === "word") {
+      // WORD MODE
+      const d = addDraft || {};
+      const editing = !!addDraft;
+      
+      // If we had a preselected root, use it (and make sure we don't overwrite if editing)
+      if (preselectedRootId && !editing) {
+        d.rootId = preselectedRootId;
+        preselectedRootId = null; // Clear it after reading
+      }
+      
+      const rootOptions = [{ value: "", label: "— choose a root —" }]
+        .concat(content.roots.map((r) => ({ value: r.id, label: r.label + " — " + r.meaning })))
+        .concat([{ value: "__new__", label: "＋ Create a new root…" }]);
+      let related = (d.related || []).slice();
+      const mine = (S.custom.words || []).slice().reverse();
+      
+      html += `
+        <div class="grid cols-2" style="align-items:start">
+          <div class="card">
+            <h3 style="margin-bottom:1rem">${editing ? "Edit word" : "Add a word"}</h3>
+            <div class="field"><label>Word *</label><input class="inp" id="fWord" value="${esc(d.word || "")}" autocomplete="off" placeholder="e.g. cardiologist"></div>
+            <div class="field"><label>Part of speech</label>${ddSingle("pos", POS_OPTIONS, d.pos || "", "— none —")}</div>
+            <div class="field"><label>Meaning *</label><textarea class="inp" id="fMean" rows="2" placeholder="a short, precise definition">${esc(d.meaning || "")}</textarea></div>
+            <div class="field"><label>Example sentence</label><textarea class="inp" id="fEx" rows="2" placeholder="a natural sentence using the word">${esc(d.example || "")}</textarea></div>
+            <div class="field"><label>Contrast / nuance</label><textarea class="inp" id="fContrast" rows="2" placeholder="how it differs from a near-synonym (optional)">${esc(d.contrast || "")}</textarea></div>
 
-          <div class="field"><label>Root *</label>${ddSingle("root", rootOptions, d.rootId || "", "— choose a root —", true)}</div>
-          <div id="newRoot" class="newroot" style="display:none">
-            <div class="field"><label>New root label *</label><input class="inp" id="fRootLabel" placeholder="e.g. CARDIO"></div>
-            <div class="grid cols-2">
-              <div class="field"><label>Origin</label>${ddSingle("origin", ORIGIN_OPTIONS, "latin", "Latin")}</div>
-              <div class="field"><label>Root meaning *</label><input class="inp" id="fRootMeaning" placeholder="e.g. heart"></div>
-            </div>
-          </div>
-
-          <div class="field"><label>Related words</label>
-            <div class="chips" id="relChips" style="margin-bottom:.4rem">${related.map(relChip).join("")}</div>
-            <div class="dd" data-dd="related">
-              <button type="button" class="dd-trigger" data-dd-trigger><span class="dd-value ph">Link related words…</span><span class="dd-caret">▾</span></button>
-              <div class="dd-panel">
-                <input class="dd-search" id="relSearch" placeholder="Search words…" autocomplete="off">
-                <div class="dd-opts" id="relOpts">${relOptionsHTML(related, "")}</div>
+            <div class="field"><label>Root *</label>${ddSingle("root", rootOptions, d.rootId || "", "— choose a root —", true)}</div>
+            <div id="newRoot" class="newroot" style="display:none">
+              <div class="field"><label>New root label *</label><input class="inp" id="fRootLabel" placeholder="e.g. CARDIO"></div>
+              <div class="grid cols-2">
+                <div class="field"><label>Origin</label>${ddSingle("origin", ORIGIN_OPTIONS, "latin", "Latin")}</div>
+                <div class="field"><label>Root meaning *</label><input class="inp" id="fRootMeaning" placeholder="e.g. heart"></div>
               </div>
             </div>
+
+            <div class="field"><label>Related words</label>
+              <div class="chips" id="relChips" style="margin-bottom:.4rem">${related.map(relChip).join("")}</div>
+              <div class="dd" data-dd="related">
+                <button type="button" class="dd-trigger" data-dd-trigger><span class="dd-value ph">Link related words…</span><span class="dd-caret">▾</span></button>
+                <div class="dd-panel">
+                  <input class="dd-search" id="relSearch" placeholder="Search words…" autocomplete="off">
+                  <div class="dd-opts" id="relOpts">${relOptionsHTML(related, "")}</div>
+                </div>
+              </div>
+            </div>
+
+            <div style="display:flex;gap:.6rem;margin-top:.4rem">
+              <button class="btn" id="fSave">${editing ? "Save changes" : "Add word"}</button>
+              ${editing ? '<button class="btn ghost" id="fCancel">Cancel</button>' : ""}
+            </div>
           </div>
 
-          <div style="display:flex;gap:.6rem;margin-top:.4rem">
-            <button class="btn" id="fSave">${editing ? "Save changes" : "Add word"}</button>
-            ${editing ? '<button class="btn ghost" id="fCancel">Cancel</button>' : ""}
+          <div class="card">
+            <div class="card-lead"><h3>My words</h3><span style="color:var(--ink-soft);font-size:.82rem">${(S.custom.words || []).length} added</span></div>
+            ${mine.length ? `<div class="mywords">${mine.map(myWordRow).join("")}</div>`
+              : `<div class="empty-note" style="padding:1.5rem 0">Nothing yet. Words you add appear here.</div>`}
           </div>
         </div>
+      `;
+    } else {
+      // ROOT MODE
+      const rd = rootDraft || {};
+      const editing = !!rootDraft;
+      const mineRoots = (S.custom.roots || []).slice().reverse();
+      
+      html += `
+        <div class="grid cols-2" style="align-items:start">
+          <div class="card">
+            <h3 style="margin-bottom:1rem">${editing ? "Edit root word" : "Add a root word"}</h3>
+            <div class="field"><label>Root label *</label><input class="inp" id="fRootLabelOnly" value="${esc(rd.label || "")}" placeholder="e.g. CARDIO"></div>
+            <div class="field"><label>Origin</label>${ddSingle("originOnly", ORIGIN_OPTIONS, rd.origin || "latin", "Latin")}</div>
+            <div class="field"><label>Meaning *</label><input class="inp" id="fRootMeaningOnly" value="${esc(rd.meaning || "")}" placeholder="e.g. heart"></div>
+            
+            <div style="display:flex;gap:.6rem;margin-top:.4rem">
+              <button class="btn" id="fSaveRoot">${editing ? "Save changes" : "Add root"}</button>
+              ${editing ? '<button class="btn ghost" id="fCancelRoot">Cancel</button>' : ""}
+            </div>
+          </div>
 
-        <div class="card">
-          <div class="card-lead"><h3>My words</h3><span style="color:var(--ink-soft);font-size:.82rem">${(S.custom.words || []).length} added</span></div>
-          ${mine.length ? `<div class="mywords">${mine.map(myWordRow).join("")}</div>`
-            : `<div class="empty-note" style="padding:1.5rem 0">Nothing yet. Words you add appear here.</div>`}
+          <div class="card">
+            <div class="card-lead"><h3>My roots</h3><span style="color:var(--ink-soft);font-size:.82rem">${(S.custom.roots || []).length} added</span></div>
+            ${mineRoots.length ? `<div class="mywords">${mineRoots.map(myRootRow).join("")}</div>`
+              : `<div class="empty-note" style="padding:1.5rem 0">Nothing yet. Roots you add appear here.</div>`}
+          </div>
         </div>
-      </div>`;
-
-    // Single-select dropdowns
-    wireDDSingle(view, "pos");
-    wireDDSingle(view, "origin");
-    const newRoot = $("#newRoot");
-    wireDDSingle(view, "root", (val) => { newRoot.style.display = val === "__new__" ? "block" : "none"; });
-    if ((d.rootId || "") === "__new__") newRoot.style.display = "block";
-
-    // Related words — in-flow expandable multi-select
-    const relDD = view.querySelector('[data-dd="related"]');
-    const relSearch = $("#relSearch");
-    relDD.querySelector("[data-dd-trigger]").addEventListener("click", () => relDD.classList.toggle("open"));
-    relSearch.addEventListener("click", (e) => e.stopPropagation());
-    relSearch.addEventListener("input", () => { $("#relOpts").innerHTML = relOptionsHTML(related, relSearch.value); wireRelOpts(); });
-    function wireRelOpts() {
-      view.querySelectorAll("#relOpts .dd-opt").forEach((o) =>
-        o.addEventListener("click", (e) => { e.stopPropagation(); toggleRel(o.dataset.val); }));
+      `;
     }
-    function toggleRel(word) {
-      const i = related.findIndex((r) => r.toLowerCase() === word.toLowerCase());
-      if (i >= 0) related.splice(i, 1); else related.push(word);
-      $("#relOpts").innerHTML = relOptionsHTML(related, relSearch.value); wireRelOpts();
-      drawRelChips();
+    
+    view.innerHTML = html;
+    
+    // Wire up events based on the active mode
+    // Common tab buttons
+    $("#modeWordBtn").addEventListener("click", () => { addViewMode = "word"; route(); });
+    $("#modeRootBtn").addEventListener("click", () => { addViewMode = "root"; route(); });
+    
+    if (mode === "word") {
+      const d = addDraft || {};
+      const editing = !!addDraft;
+      
+      // Wire POS dropdown
+      wireDDSingle(view, "pos");
+      
+      // Wire root dropdown
+      const newRoot = $("#newRoot");
+      wireDDSingle(view, "root", (val) => { newRoot.style.display = val === "__new__" ? "block" : "none"; });
+      if ((d.rootId || "") === "__new__") newRoot.style.display = "block";
+      
+      // Wire origin dropdown (inside new root panel)
+      wireDDSingle(view, "origin");
+      
+      // Related words logic
+      let related = (d.related || []).slice();
+      const relDD = view.querySelector('[data-dd="related"]');
+      const relSearch = $("#relSearch");
+      relDD.querySelector("[data-dd-trigger]").addEventListener("click", () => relDD.classList.toggle("open"));
+      relSearch.addEventListener("click", (e) => e.stopPropagation());
+      relSearch.addEventListener("input", () => { $("#relOpts").innerHTML = relOptionsHTML(related, relSearch.value); wireRelOpts(); });
+      
+      function wireRelOpts() {
+        view.querySelectorAll("#relOpts .dd-opt").forEach((o) =>
+          o.addEventListener("click", (e) => { e.stopPropagation(); toggleRel(o.dataset.val); }));
+      }
+      function toggleRel(word) {
+        const i = related.findIndex((r) => r.toLowerCase() === word.toLowerCase());
+        if (i >= 0) related.splice(i, 1); else related.push(word);
+        $("#relOpts").innerHTML = relOptionsHTML(related, relSearch.value); wireRelOpts();
+        drawRelChips();
+      }
+      function drawRelChips() {
+        $("#relChips").innerHTML = related.map(relChip).join("");
+        view.querySelectorAll("#relChips [data-rmrel]").forEach((b) => b.addEventListener("click", () => toggleRel(b.dataset.rmrel)));
+      }
+      wireRelOpts(); drawRelChips();
+      
+      $("#fSave").addEventListener("click", () => saveWord(related, editing ? d.__key : null));
+      if (editing) $("#fCancel").addEventListener("click", () => { addDraft = null; route(); });
+      
+      view.querySelectorAll("[data-edit]").forEach((b) => b.addEventListener("click", () => beginEdit(b.dataset.edit)));
+      view.querySelectorAll("[data-del]").forEach((b) => b.addEventListener("click", () => deleteWord(b.dataset.del)));
+    } else {
+      const rd = rootDraft || {};
+      const editing = !!rootDraft;
+      
+      // Wire Origin dropdown for roots form
+      wireDDSingle(view, "originOnly");
+      
+      $("#fSaveRoot").addEventListener("click", () => saveRoot(editing ? rd.__key : null));
+      if (editing) $("#fCancelRoot").addEventListener("click", () => { rootDraft = null; route(); });
+      
+      view.querySelectorAll("[data-edit-root]").forEach((b) => b.addEventListener("click", () => beginEditRoot(b.dataset.editRoot)));
+      view.querySelectorAll("[data-del-root]").forEach((b) => b.addEventListener("click", () => deleteRoot(b.dataset.delRoot)));
     }
-    function drawRelChips() {
-      $("#relChips").innerHTML = related.map(relChip).join("");
-      view.querySelectorAll("#relChips [data-rmrel]").forEach((b) => b.addEventListener("click", () => toggleRel(b.dataset.rmrel)));
-    }
-    wireRelOpts(); drawRelChips();
-
-    $("#fSave").addEventListener("click", () => saveWord(related, editing ? d.__key : null));
-    if (editing) $("#fCancel").addEventListener("click", () => { addDraft = null; route(); });
-
-    view.querySelectorAll("[data-edit]").forEach((b) => b.addEventListener("click", () => beginEdit(b.dataset.edit)));
-    view.querySelectorAll("[data-del]").forEach((b) => b.addEventListener("click", () => deleteWord(b.dataset.del)));
   };
 
   function relOptionsHTML(related, q) {
@@ -891,6 +1016,20 @@
         <button class="mini-btn" data-edit="${esc(w.word.toLowerCase())}">Edit</button>
         <button class="mini-btn" data-del="${esc(w.word.toLowerCase())}">Delete</button>
       </div></div>`;
+  }
+
+  function myRootRow(r) {
+    return `<div class="myword ${oc(r.origin)}">
+      <div>
+        <span class="root-label" style="font-size:1.05rem;color:var(--oc);font-family:var(--serif);font-weight:700">${esc(r.label)}</span>
+        <span class="badge" style="margin-left:.3rem">${esc(cap(r.origin))}</span>
+        <div style="color:var(--ink-soft);font-size:.82rem">“${esc(r.meaning)}”</div>
+      </div>
+      <div style="display:flex;gap:.3rem;flex:none;align-items:center">
+        <button class="mini-btn" data-edit-root="${esc(r.id)}">Edit</button>
+        <button class="mini-btn" data-del-root="${esc(r.id)}">Delete</button>
+      </div>
+    </div>`;
   }
 
   function saveWord(related, editKey) {
@@ -927,19 +1066,64 @@
     checkAchievements(); route();
   }
 
+  function saveRoot(editKey) {
+    const label = $("#fRootLabelOnly").value.trim().toUpperCase();
+    const meaning = $("#fRootMeaningOnly").value.trim();
+    const origin = $('[data-dd="originOnly"]').dataset.value || "latin";
+    
+    if (!label) return toast("Enter a root label", "⚠️");
+    if (!meaning) return toast("Enter a root meaning", "⚠️");
+    
+    const rootId = "custom-" + slug(label);
+    
+    // check duplicate
+    const isDup = S.custom.roots.some((r) => r.id === rootId && (!editKey || editKey !== r.id)) ||
+                  DS.roots.some((r) => r.id === rootId);
+    if (isDup) return toast('Root "' + label + '" already exists', "⚠️");
+    
+    const entry = { id: rootId, label: label, origin: origin, meaning: meaning };
+    
+    if (editKey) {
+      // update any words that were pointing to the old rootId
+      S.custom.words.forEach((w) => {
+        if (w.rootId === editKey) w.rootId = rootId;
+      });
+      S.custom.roots = S.custom.roots.filter((r) => r.id !== editKey);
+    }
+    
+    S.custom.roots.push(entry);
+    persist(); rebuildContent();
+    rootDraft = null;
+    toast(editKey ? "Root updated" : "Root added — you can now attach words to it", "✅");
+    route();
+  }
+
   function beginEdit(key) {
     const w = S.custom.words.find((x) => x.word.toLowerCase() === key); if (!w) return;
     addDraft = Object.assign({}, w, { __key: key });
     route(); window.scrollTo(0, 0);
   }
+
+  function beginEditRoot(id) {
+    const r = S.custom.roots.find((x) => x.id === id); if (!r) return;
+    rootDraft = Object.assign({}, r, { __key: id });
+    route(); window.scrollTo(0, 0);
+  }
+
   function deleteWord(key) {
     S.custom.words = S.custom.words.filter((w) => w.word.toLowerCase() !== key);
-    // drop now-empty custom roots
-    S.custom.roots = S.custom.roots.filter((r) => S.custom.words.some((w) => w.rootId === r.id));
     persist(); rebuildContent(); toast("Word deleted", "🗑️"); route();
   }
 
-  // ---- Stats ----
+  function deleteRoot(id) {
+    const hasWords = allWords(content).some((w) => w.rootId === id);
+    if (hasWords) {
+      return toast("Cannot delete root: words are attached to it", "⚠️");
+    }
+    S.custom.roots = S.custom.roots.filter((r) => r.id !== id);
+    persist(); rebuildContent(); toast("Root deleted", "🗑️"); route();
+  }
+
   VIEWS.stats = function (view) {
     view.className = "view";
     const c = counts(content);
@@ -1039,7 +1223,12 @@
 
   /* ---------------- 8. init ---------------- */
   if (!DATASETS.length) { document.body.innerHTML = '<p style="padding:2rem;font-family:sans-serif">No dataset loaded.</p>'; return; }
-  window.addEventListener("hashchange", () => { if (currentRoute() !== "quiz") quiz = null; if (currentRoute() !== "flashcards") flash = null; if (currentRoute() !== "add") addDraft = null; route(); });
+  window.addEventListener("hashchange", () => {
+    if (currentRoute() !== "quiz") quiz = null;
+    if (currentRoute() !== "flashcards") flash = null;
+    if (currentRoute() !== "add") { addDraft = null; rootDraft = null; addViewMode = "word"; }
+    route();
+  });
   if (window.matchMedia) window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { if (G.theme === "system") applyTheme(); });
 
   // Close any open in-flow dropdown when clicking outside of it.
