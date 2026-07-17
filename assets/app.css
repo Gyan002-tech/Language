@@ -439,3 +439,129 @@ select.inp { appearance: none; -webkit-appearance: none; cursor: pointer; }
   .nav-toggle { display: grid; }
   .brand-text { display: none; }
 }
+
+/* ---------- Dotted links for word references ---------- */
+.goto-word-link {
+  border: none;
+  background: transparent;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  color: var(--accent);
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  cursor: pointer;
+}
+.goto-word-link:hover {
+  color: var(--ink);
+  text-decoration-style: solid;
+}
+
+/* ---------- Interactive Morphology Workbench ---------- */
+.workbench {
+  background: var(--surface-2);
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--r);
+  padding: 1.2rem;
+  margin-bottom: 1.5rem;
+  box-shadow: var(--shadow);
+}
+.workbench-header {
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-soft);
+  margin-bottom: 0.6rem;
+}
+.workbench-display {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1.5rem;
+  margin: 1.2rem 0;
+  flex-wrap: wrap;
+}
+.workbench-part {
+  font-family: var(--serif);
+  font-size: 1.6rem;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: baseline;
+}
+.workbench-part .root-part {
+  color: var(--ink);
+}
+.workbench-part .suffix-part {
+  padding: 0 2px;
+  border-radius: 4px;
+}
+.workbench-part .suffix-part.base-suff {
+  color: var(--bad);
+  background: var(--bad-soft);
+  text-decoration: line-through;
+}
+.workbench-part .suffix-part.target-suff {
+  color: var(--good);
+  background: var(--good-soft);
+}
+.workbench-part .pos-badge {
+  font-family: var(--sans);
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  font-weight: 800;
+  padding: 0.15rem 0.35rem;
+  border-radius: 4px;
+  margin-left: 0.4rem;
+  background: var(--rule);
+  color: var(--ink-soft);
+  align-self: center;
+}
+.workbench-arrow {
+  font-size: 1.5rem;
+  color: var(--ink-faint);
+}
+.workbench-desc {
+  font-size: 0.88rem;
+  color: var(--ink-soft);
+  border-top: 1px solid var(--rule);
+  padding-top: 0.8rem;
+  margin-top: 0.4rem;
+  line-height: 1.45;
+}
+.workbench-links {
+  margin-top: 0.5rem;
+  font-size: 0.82rem;
+  color: var(--ink-faint);
+}
+
+/* Table styling for pathways */
+.pathway-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 0.8rem;
+  font-size: 0.88rem;
+}
+.pathway-table th, .pathway-table td {
+  padding: 0.65rem 0.8rem;
+  text-align: left;
+  border-bottom: 1px solid var(--rule);
+}
+.pathway-table th {
+  font-weight: 700;
+  color: var(--ink-soft);
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  background: var(--surface-2);
+}
+.pathway-table tbody tr {
+  cursor: pointer;
+}
+.pathway-table tbody tr:hover {
+  background: var(--surface-2);
+}
+.pathway-table tbody tr.active-row {
+  background: var(--accent-soft);
+  font-weight: 600;
+}

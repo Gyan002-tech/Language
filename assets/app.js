@@ -16,6 +16,17 @@
   const dayKey = (t) => { const d = new Date(t); return d.getFullYear() + "-" + (d.getMonth() + 1) + "-" + d.getDate(); };
   const DAY = 86400000;
 
+  function linkifyExamples(text) {
+    return text.replace(/\b[a-z]+(?:-[a-z]+)*\b/gi, (match) => {
+      const lower = match.toLowerCase();
+      const found = findWord(lower);
+      if (found) {
+        return `<button class="goto-word-link" data-goto="${esc(lower)}" title="Jump to word details">${esc(match)}</button>`;
+      }
+      return match;
+    });
+  }
+
   function toast(msg, icon) {
     let wrap = $(".toast-wrap");
     if (!wrap) { wrap = document.createElement("div"); wrap.className = "toast-wrap"; document.body.appendChild(wrap); }
@@ -510,26 +521,252 @@
   };
 
   // ---- Morphology ----
+  // ---- Morphology Restructured Data ----
+  const NOUN_TO_ADJ_PAIRS = [
+    { base: "Altruism", basePos: "n", target: "Altruistic", targetPos: "adj", root: "altru", baseSuff: "ism", targetSuff: "istic", desc: "Altruistic describes actions showing a disinterested and selfless concern for the well-being of others (Altruism)." },
+    { base: "Philanthropy", basePos: "n", target: "Philanthropic", targetPos: "adj", root: "philanthrop", baseSuff: "y", targetSuff: "ic", desc: "Philanthropic describes charitable acts or organizations. The suffix -y (abstract noun) drops, and -ic (adjective suffix) is appended." },
+    { base: "Misanthropy", basePos: "n", target: "Misanthropic", targetPos: "adj", root: "misanthrop", baseSuff: "y", targetSuff: "ic", desc: "Misanthropic describes a hatred or distrust of humankind. Drop the noun suffix -y, and append -ic." },
+    { base: "Anthropology", basePos: "n", target: "Anthropological", targetPos: "adj", root: "anthropolog", baseSuff: "y", targetSuff: "ical", desc: "Anthropological describes the study of human development and cultures. Drop -y and add -ical." },
+    { base: "Gynecology", basePos: "n", target: "Gynecological", targetPos: "adj", root: "gynecolog", baseSuff: "y", targetSuff: "ical", desc: "Gynecological relates to the medical specialty of women's health. Drop -y and add -ical." },
+    { base: "Monogamy", basePos: "n", target: "Monogamous", targetPos: "adj", root: "monogam", baseSuff: "y", targetSuff: "ous", desc: "Monogamous describes marriage/relations with one spouse at a time. Drop -y and add -ous." },
+    { base: "Polygamy", basePos: "n", target: "Polygamous", targetPos: "adj", root: "polygam", baseSuff: "y", targetSuff: "ous", desc: "Polygamous describes marriage/relations with multiple spouses. Drop -y and add -ous." },
+    { base: "Misogyny", basePos: "n", target: "Misogynous", targetPos: "adj", root: "misogyn", baseSuff: "y", targetSuff: "ous", desc: "Misogynous (or misogynistic) describes hatred or prejudice against women. Drop -y and add -ous." }
+  ];
+
+  const ADJ_TO_NOUN_PAIRS = [
+    { base: "Dexterous", basePos: "adj", target: "Dexterity", targetPos: "n", root: "dexter", baseSuff: "ous", targetSuff: "ity", desc: "Add -ity to adjectives ending in -ous to form the abstract noun representing the quality (note: the 'o' in -ous drops out, yielding -ity)." },
+    { base: "Ambidextrous", basePos: "adj", target: "Ambidexterity", targetPos: "n", root: "ambidexter", baseSuff: "ous", targetSuff: "ity", desc: "Add -ity to adjectives ending in -ous to form the abstract noun representing the quality (note: the 'o' in -ous drops out, yielding -ity)." },
+    { base: "Adroit", basePos: "adj", target: "Adroitness", targetPos: "n", root: "adroit", baseSuff: "", targetSuff: "ness", desc: "Append suffix -ness to form the abstract noun representing mental or physical skill." },
+    { base: "Gauche", basePos: "adj", target: "Gaucherie", targetPos: "n", root: "gauch", baseSuff: "e", targetSuff: "erie", desc: "Append the French-derived suffix -erie to the base root." }
+  ];
+
+  let morphMode = "pos"; // "pos" | "pathways"
+  let activeNounToAdjIndex = 0;
+  let activeAdjToNounIndex = 0;
+
+  function renderWorkbench(pair) {
+    const baseLink = linkifyExamples(pair.base);
+    const targetLink = linkifyExamples(pair.target);
+    return `
+      <div class="workbench">
+        <div class="workbench-header">Interactive Suffix Morphing Workbench</div>
+        <div class="workbench-display">
+          <span class="workbench-part">
+            <span class="root-part">${esc(pair.root)}</span><span class="suffix-part base-suff">${esc(pair.baseSuff || "∅")}</span>
+            <span class="pos-badge">${esc(pair.basePos)}</span>
+          </span>
+          <span class="workbench-arrow">──▶</span>
+          <span class="workbench-part">
+            <span class="root-part">${esc(pair.root)}</span><span class="suffix-part target-suff">${esc(pair.targetSuff)}</span>
+            <span class="pos-badge">${esc(pair.targetPos)}</span>
+          </span>
+        </div>
+        <div class="workbench-desc">
+          <strong>Rule:</strong> ${esc(pair.desc)}
+          <div class="workbench-links" style="margin-top:.6rem">
+            Explore: <strong>${baseLink}</strong> (base) or <strong>${targetLink}</strong> (derived)
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  function renderNounToAdjTable() {
+    const rows = NOUN_TO_ADJ_PAIRS.map((p, idx) => {
+      const activeCls = idx === activeNounToAdjIndex ? 'class="active-row"' : '';
+      return `
+        <tr ${activeCls} data-noun-adj-idx="${idx}">
+          <td style="font-weight:600;font-family:var(--serif);font-size:1.05rem;color:var(--accent)">${esc(p.base)} <span style="font-size:.75rem;font-weight:normal;color:var(--ink-soft);font-family:var(--sans)">(${p.basePos})</span></td>
+          <td style="font-size:1.1rem;color:var(--ink-soft)">──▶</td>
+          <td style="font-weight:600;font-family:var(--serif);font-size:1.05rem;color:var(--good)">${esc(p.target)} <span style="font-size:.75rem;font-weight:normal;color:var(--ink-soft);font-family:var(--sans)">(${p.targetPos})</span></td>
+          <td style="font-family:monospace;color:var(--ink-soft)">-${esc(p.baseSuff || "∅")} ──▶ -${esc(p.targetSuff)}</td>
+        </tr>
+      `;
+    }).join("");
+    return `
+      <table class="pathway-table">
+        <thead>
+          <tr>
+            <th>Base Noun</th>
+            <th></th>
+            <th>Derived Adjective</th>
+            <th>Suffix Shift</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows}
+        </tbody>
+      </table>
+    `;
+  }
+
+  function renderAdjToNounTable() {
+    const rows = ADJ_TO_NOUN_PAIRS.map((p, idx) => {
+      const activeCls = idx === activeAdjToNounIndex ? 'class="active-row"' : '';
+      return `
+        <tr ${activeCls} data-adj-noun-idx="${idx}">
+          <td style="font-weight:600;font-family:var(--serif);font-size:1.05rem;color:var(--greek)">${esc(p.base)} <span style="font-size:.75rem;font-weight:normal;color:var(--ink-soft);font-family:var(--sans)">(${p.basePos})</span></td>
+          <td style="font-size:1.1rem;color:var(--ink-soft)">──▶</td>
+          <td style="font-weight:600;font-family:var(--serif);font-size:1.05rem;color:var(--accent)">${esc(p.target)} <span style="font-size:.75rem;font-weight:normal;color:var(--ink-soft);font-family:var(--sans)">(${p.targetPos})</span></td>
+          <td style="font-family:monospace;color:var(--ink-soft)">-${esc(p.baseSuff || "∅")} ──▶ -${esc(p.targetSuff)}</td>
+        </tr>
+      `;
+    }).join("");
+    return `
+      <table class="pathway-table">
+        <thead>
+          <tr>
+            <th>Base Adjective</th>
+            <th></th>
+            <th>Derived Noun</th>
+            <th>Suffix Shift</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows}
+        </tbody>
+      </table>
+    `;
+  }
+
   VIEWS.morphology = function (view) {
     view.className = "view";
-    view.innerHTML = `
-      <div class="view-head"><h1>Morphology</h1><p>The generative grammar — suffix and prefix patterns you can apply to derive new words.</p></div>
-      <div class="toolbar"><input class="search" id="mSearch" placeholder="Search rules…"></div>
-      <div class="root-list" id="mList"></div>`;
-    const draw = () => {
-      const q = ($("#mSearch").value || "").trim().toLowerCase();
-      const rows = content.morphology.filter((m) => !q || (m.rule + " " + (m.examples || []).join(" ")).toLowerCase().includes(q));
-      const openAll = !!q; // auto-expand while searching, collapsed otherwise
-      $("#mList").innerHTML = rows.length ? rows.map((m) => `
-        <div class="root-card o-latin ${openAll ? "open" : ""}">
-          <button class="root-head"><span class="root-title"><span class="root-label" style="font-size:1rem">${esc(m.rule)}</span></span>
-            <span class="root-meta">${unitTag(m, true) ? `<span class="count-badge">${esc(unitTag(m, true))}</span>` : ""}<span class="chevron">▸</span></span></button>
-          <div class="root-body"><ul style="margin:.3rem 0 0;padding-left:1.2rem;line-height:1.7">
-            ${(m.examples || []).map((e) => `<li>${esc(e)}</li>`).join("")}</ul></div>
-        </div>`).join("") : `<div class="empty-note">No rules match.</div>`;
-      $("#mList").querySelectorAll(".root-head").forEach((h) => h.addEventListener("click", () => h.closest(".root-card").classList.toggle("open")));
-    };
-    $("#mSearch").addEventListener("input", draw); draw();
+    
+    let html = `
+      <div class="view-head">
+        <h1>Morphology & Word Building</h1>
+        <p>The generative grammar of English — prefixes, suffixes, and part-of-speech conversion guidelines.</p>
+      </div>
+      
+      <div class="pill-row" style="margin-bottom: 1.4rem">
+        <button class="pill ${morphMode === 'pos' ? 'active' : ''}" id="morphPosBtn">Browse by POS</button>
+        <button class="pill ${morphMode === 'pathways' ? 'active' : ''}" id="morphPathBtn">Conversion Pathways</button>
+      </div>
+    `;
+    
+    if (morphMode === "pos") {
+      // Browse by POS layout
+      html += `
+        <div class="grid cols-2" style="align-items:start">
+          <div class="card">
+            <h3 style="color:var(--accent);margin-bottom:.8rem;font-family:var(--serif)">Noun-Forming Elements</h3>
+            <p style="color:var(--ink-soft);font-size:.85rem;margin-bottom:1rem">Suffixes and prefixes that construct nouns (representing people, roles, practices, or qualities).</p>
+            
+            <div class="detail" style="margin-bottom:.8rem">
+              <div style="font-weight:700;font-size:.9rem;color:var(--ink)">-ist (Agent Suffix)</div>
+              <div style="font-size:.85rem;color:var(--ink-soft)">Denotes a person who practices, believes, or specializes in something.</div>
+              <div style="font-size:.82rem;margin-top:.3rem;color:var(--ink-faint)">
+                Examples: ${linkifyExamples("altruist, misanthrope, egocentric, egoist, egotist, bigamist, monogamist, polygamist, anthropologist, gynecologist")}
+              </div>
+            </div>
+
+            <div class="detail" style="margin-bottom:.8rem">
+              <div style="font-weight:700;font-size:.9rem;color:var(--ink)">-y / -ism (Abstract Suffixes)</div>
+              <div style="font-size:.85rem;color:var(--ink-soft)">Denotes a practice, state, condition, or philosophy.</div>
+              <div style="font-size:.82rem;margin-top:.3rem;color:var(--ink-faint)">
+                Examples: ${linkifyExamples("altruism, philanthropy, monogamy, bigamy, polygamy, polyandry, asceticism, misogyny, gaucherie")}
+              </div>
+            </div>
+
+            <div class="detail">
+              <div style="font-weight:700;font-size:.9rem;color:var(--ink)">-ity / -ness (Quality/State Suffixes)</div>
+              <div style="font-size:.85rem;color:var(--ink-soft)">Denotes a quality, condition, or level of skill.</div>
+              <div style="font-size:.82rem;margin-top:.3rem;color:var(--ink-faint)">
+                Examples: ${linkifyExamples("dexterity, adroitness, egocentricity, ambidexterity, alternative, alteration")}
+              </div>
+            </div>
+          </div>
+
+          <div class="card">
+            <h3 style="color:var(--greek);margin-bottom:.8rem;font-family:var(--serif)">Adjective-Forming Elements</h3>
+            <p style="color:var(--ink-soft);font-size:.85rem;margin-bottom:1rem">Suffixes and prefixes that construct descriptive adjectives (expressing characteristics, tendencies, or directions).</p>
+
+            <div class="detail" style="margin-bottom:.8rem">
+              <div style="font-weight:700;font-size:.9rem;color:var(--ink)">-ic / -ical (Descriptive Suffixes)</div>
+              <div style="font-size:.85rem;color:var(--ink-soft)">Means "pertaining to" or "having the nature of".</div>
+              <div style="font-size:.82rem;margin-top:.3rem;color:var(--ink-faint)">
+                Examples: ${linkifyExamples("altruistic, misanthropic, philanthropic, egomaniacal, anthropological, gynecological")}
+              </div>
+            </div>
+
+            <div class="detail" style="margin-bottom:.8rem">
+              <div style="font-weight:700;font-size:.9rem;color:var(--ink)">-ous / -ious (Descriptive Suffixes)</div>
+              <div style="font-size:.85rem;color:var(--ink-soft)">Means "full of" or "possessing the qualities of".</div>
+              <div style="font-size:.82rem;margin-top:.3rem;color:var(--ink-faint)">
+                Examples: ${linkifyExamples("monogamous, bigamous, polygamous, polyandrous, dexterous, sinister, misogynous")}
+              </div>
+            </div>
+
+            <div class="detail">
+              <div style="font-weight:700;font-size:.9rem;color:var(--ink)">intro- / extro- / ambi- (Direction Prefixes)</div>
+              <div style="font-size:.85rem;color:var(--ink-soft)">Indicates where thoughts or physical skills are turned.</div>
+              <div style="font-size:.82rem;margin-top:.3rem;color:var(--ink-faint)">
+                Examples: ${linkifyExamples("introvert, extrovert, ambivert, ambidextrous, adroit, gauche")}
+              </div>
+            </div>
+          </div>
+        </div>
+      `;
+    } else if (morphMode === "pathways") {
+      // Conversion Pathways
+      const nounToAdjPair = NOUN_TO_ADJ_PAIRS[activeNounToAdjIndex];
+      const adjToNounPair = ADJ_TO_NOUN_PAIRS[activeAdjToNounIndex];
+      
+      html += `
+        <div class="grid cols-2" style="align-items:start">
+          <div class="card">
+            <h3 style="margin-bottom:.8rem;font-family:var(--serif)">Noun ──▶ Adjective</h3>
+            <p style="color:var(--ink-soft);font-size:.85rem;margin-bottom:1rem">Understand how abstract concepts (nouns) transition into descriptive traits (adjectives).</p>
+            ${renderWorkbench(nounToAdjPair)}
+            <div style="margin-top:1rem">
+              <div style="font-weight:700;font-size:.78rem;text-transform:uppercase;color:var(--ink-soft);margin-bottom:.4rem">Select an example to load:</div>
+              ${renderNounToAdjTable()}
+            </div>
+          </div>
+
+          <div class="card">
+            <h3 style="margin-bottom:.8rem;font-family:var(--serif)">Adjective ──▶ Noun</h3>
+            <p style="color:var(--ink-soft);font-size:.85rem;margin-bottom:1rem">Understand how qualities and descriptions (adjectives) are turned into abstract quality nouns.</p>
+            ${renderWorkbench(adjToNounPair)}
+            <div style="margin-top:1rem">
+              <div style="font-weight:700;font-size:.78rem;text-transform:uppercase;color:var(--ink-soft);margin-bottom:.4rem">Select an example to load:</div>
+              ${renderAdjToNounTable()}
+            </div>
+          </div>
+        </div>
+      `;
+    }
+    
+    view.innerHTML = html;
+    
+    // Wire up events
+    $("#morphPosBtn").addEventListener("click", () => { morphMode = "pos"; route(); });
+    $("#morphPathBtn").addEventListener("click", () => { morphMode = "pathways"; route(); });
+    
+    // Handle goto link click delegation
+    view.addEventListener("click", (e) => {
+      const link = e.target.closest("[data-goto]");
+      if (link) {
+        e.stopPropagation();
+        window.openWord(link.dataset.goto);
+      }
+    });
+    
+    // Wire up row selections for workbenches
+    if (morphMode === "pathways") {
+      view.querySelectorAll("tr[data-noun-adj-idx]").forEach((tr) => {
+        tr.addEventListener("click", () => {
+          activeNounToAdjIndex = parseInt(tr.dataset.nounAdjIdx, 10);
+          route();
+        });
+      });
+      view.querySelectorAll("tr[data-adj-noun-idx]").forEach((tr) => {
+        tr.addEventListener("click", () => {
+          activeAdjToNounIndex = parseInt(tr.dataset.adjNounIdx, 10);
+          route();
+        });
+      });
+    }
   };
 
   // ---- Quiz ----
@@ -1227,6 +1464,7 @@ dd.querySelectorAll(".dd-opt").forEach((o) => o.addEventListener("click", () => 
     if (currentRoute() !== "quiz") quiz = null;
     if (currentRoute() !== "flashcards") flash = null;
     if (currentRoute() !== "add") { addDraft = null; rootDraft = null; addViewMode = "word"; }
+    if (currentRoute() !== "morphology") { morphMode = "pos"; activeNounToAdjIndex = 0; activeAdjToNounIndex = 0; }
     route();
   });
   if (window.matchMedia) window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { if (G.theme === "system") applyTheme(); });
