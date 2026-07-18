@@ -67,14 +67,115 @@
   let DS = datasetById(G.datasetId);
   let S = loadState();
 
+  // Cloud Storage (Firebase Firestore) Configuration
+  let db = null;
+  let cloudStatus = "local"; // "local" | "syncing" | "synced" | "error"
+
+  if (window.FIREBASE_CONFIG && window.FIREBASE_CONFIG.apiKey && window.FIREBASE_CONFIG.apiKey !== "YOUR_API_KEY") {
+    try {
+      firebase.initializeApp(window.FIREBASE_CONFIG);
+      db = firebase.firestore();
+    } catch (e) {
+      console.error("Firebase initialization failed:", e);
+    }
+  }
+
   function loadState() {
-    const st = load(skey(DS.id), { cards: {}, words: {}, log: [], days: {}, achievements: {}, settings: {}, custom: null });
+    const st = load(skey(DS.id), { cards: {}, words: {}, log: [], days: {}, achievements: {}, settings: {}, custom: null, updatedAt: 0 });
     if (!st.cards) st.cards = {}; if (!st.words) st.words = {};
     if (!st.log) st.log = []; if (!st.days) st.days = {}; if (!st.achievements) st.achievements = {};
     if (!st.custom) st.custom = { roots: [], words: [] };
     return st;
   }
-  function persist() { save(skey(DS.id), S); }
+
+  function persist() {
+    S.updatedAt = Date.now();
+    save(skey(DS.id), S);
+    pushLocalToCloud();
+  }
+
+  async function pushLocalToCloud() {
+    if (!db) return;
+    try {
+      cloudStatus = "syncing";
+      updateCloudIndicator();
+      await db.collection("users").doc("Gyan").set({
+        state: S,
+        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+      });
+      cloudStatus = "synced";
+      updateCloudIndicator();
+    } catch (e) {
+      console.error("Cloud push failed:", e);
+      cloudStatus = "error";
+      updateCloudIndicator();
+    }
+  }
+
+  async function syncCloud(forcePull = false) {
+    if (!db) return;
+    try {
+      cloudStatus = "syncing";
+      updateCloudIndicator();
+      const docRef = db.collection("users").doc("Gyan");
+      const doc = await docRef.get();
+      let cloudState = null;
+      let cloudTime = 0;
+
+      if (doc.exists) {
+        const data = doc.data();
+        cloudState = data.state;
+        cloudTime = data.updatedAt ? (data.updatedAt.toMillis ? data.updatedAt.toMillis() : data.updatedAt) : 0;
+      }
+
+      const localTime = S.updatedAt || 0;
+
+      if (cloudState && (cloudTime > localTime || forcePull)) {
+        S = Object.assign({}, S, cloudState);
+        save(skey(DS.id), S);
+        rebuildContent();
+        cloudStatus = "synced";
+        updateCloudIndicator();
+        toast("Cloud progress synchronized", "☁️");
+        route();
+      } else {
+        S.updatedAt = Date.now();
+        await docRef.set({
+          state: S,
+          updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+        cloudStatus = "synced";
+        updateCloudIndicator();
+      }
+    } catch (e) {
+      console.error("Cloud sync failed:", e);
+      cloudStatus = "error";
+      updateCloudIndicator();
+    }
+  }
+
+  function updateCloudIndicator() {
+    const el = $("#cloudIndicator");
+    if (!el) return;
+    if (!db) {
+      el.style.display = "none";
+      return;
+    }
+    el.style.display = "inline-block";
+    if (cloudStatus === "local") {
+      el.innerHTML = "☁️";
+      el.title = "Connected, click to manual sync";
+    } else if (cloudStatus === "syncing") {
+      el.innerHTML = "🔄";
+      el.title = "Syncing with cloud...";
+    } else if (cloudStatus === "synced") {
+      el.innerHTML = "☁️ ✅";
+      el.title = "Cloud Synced";
+    } else if (cloudStatus === "error") {
+      el.innerHTML = "☁️ ⚠️";
+      el.title = "Cloud Sync Error. Click to retry.";
+    }
+  }
 
   /* Merged content = book dataset + user's custom layer. Everything that reads
      vocabulary reads from `content`, never from DS directly, so custom words
@@ -226,6 +327,7 @@
           </nav>
           <div class="appbar-tools">
             ${DATASETS.length > 1 ? `<select class="dataset-switch" id="dsSwitch">${dsOpts}</select>` : ""}
+            <span id="cloudIndicator" style="font-size:0.9rem;margin-right:0.6rem;cursor:pointer;display:none" title="Cloud Sync Status"></span>
             <button class="icon-btn" id="themeBtn" title="Theme">◐</button>
           </div>
         </div>
@@ -242,7 +344,16 @@
     if (sw) sw.addEventListener("change", () => {
       G.datasetId = sw.value; saveG(); DS = datasetById(sw.value); S = loadState(); rebuildContent();
       toast("Switched to " + DS.title, "📚"); route();
+      if (db) syncCloud();
     });
+    const ci = $("#cloudIndicator");
+    if (ci) {
+      ci.addEventListener("click", () => {
+        toast("Manual sync triggered...", "🔄");
+        syncCloud(true);
+      });
+    }
+    updateCloudIndicator();
     applyTheme();
   }
 
@@ -1612,4 +1723,5 @@ dd.querySelectorAll(".dd-opt").forEach((o) => o.addEventListener("click", () => 
   renderShell();
   if (!location.hash) location.hash = "#/dashboard";
   route();
+  if (db) syncCloud();
 })();
