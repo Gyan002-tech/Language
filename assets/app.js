@@ -71,9 +71,19 @@
   let db = null;
   let cloudStatus = "local"; // "local" | "syncing" | "synced" | "error"
 
-  if (window.FIREBASE_CONFIG && window.FIREBASE_CONFIG.apiKey && window.FIREBASE_CONFIG.apiKey !== "YOUR_API_KEY") {
+  let firebaseConfig = window.FIREBASE_CONFIG;
+  if (!firebaseConfig || !firebaseConfig.apiKey || firebaseConfig.apiKey === "YOUR_API_KEY") {
     try {
-      firebase.initializeApp(window.FIREBASE_CONFIG);
+      const stored = localStorage.getItem("vocabApp:v1:firebaseConfig");
+      if (stored) firebaseConfig = JSON.parse(stored);
+    } catch (e) {
+      console.error("Failed to parse stored Firebase config:", e);
+    }
+  }
+
+  if (firebaseConfig && firebaseConfig.apiKey && firebaseConfig.apiKey !== "YOUR_API_KEY") {
+    try {
+      firebase.initializeApp(firebaseConfig);
       db = firebase.firestore();
     } catch (e) {
       console.error("Firebase initialization failed:", e);
