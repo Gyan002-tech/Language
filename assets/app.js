@@ -1639,6 +1639,28 @@ dd.querySelectorAll(".dd-opt").forEach((o) => o.addEventListener("click", () => 
       </div>
 
       <div class="card" style="margin-top:1rem">
+        <div class="card-lead"><h3>Cloud Sync</h3></div>
+        <p style="color:var(--ink-soft);margin:0 0 .8rem">
+          ${db ? "☁️ Connected to your Firestore database." : "🔌 Cloud sync is disabled. Configure Firebase Firestore to enable multi-device sync."}
+        </p>
+        <div style="display:flex;gap:.6rem;flex-wrap:wrap">
+          <button class="btn" id="cfgSyncBtn">🔑 Configure Sync</button>
+          ${db ? `
+            <button class="btn ghost" id="testSyncBtn" style="color:var(--good)">🔄 Sync Now</button>
+            <button class="btn ghost" id="resetSyncBtn" style="color:var(--bad)">✕ Disconnect</button>
+          ` : ""}
+        </div>
+        <div id="syncConfigForm" style="display:none;margin-top:1rem;background:var(--surface-2);padding:1rem;border-radius:var(--r)">
+          <p style="margin-top:0;font-size:0.85rem;color:var(--ink-soft)">Paste the Firebase configuration credentials block here:</p>
+          <textarea id="syncCfgVal" rows="8" style="width:100%;font-family:monospace;font-size:0.8rem;padding:0.5rem;background:var(--surface-1);color:var(--ink);border:1px solid var(--rule);border-radius:4px" placeholder='{\n  "apiKey": "AIzaSy...",\n  "authDomain": "...",\n  "projectId": "..."\n}'></textarea>
+          <div style="display:flex;gap:0.5rem;margin-top:0.5rem">
+            <button class="btn" id="saveSyncCfgBtn">Save & Connect</button>
+            <button class="btn ghost" id="closeSyncCfgBtn">Cancel</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:1rem">
         <div class="card-lead"><h3>Your data</h3></div>
         <p style="color:var(--ink-soft);margin:0 0 .8rem">Progress is saved in this browser. Export a snapshot to back it up or share it with your teacher; import to restore.</p>
         <div style="display:flex;gap:.6rem;flex-wrap:wrap">
@@ -1647,9 +1669,68 @@ dd.querySelectorAll(".dd-opt").forEach((o) => o.addEventListener("click", () => 
           <input type="file" id="impFile" accept="application/json" style="display:none">
         </div>
       </div>`;
+
     $("#expBtn").addEventListener("click", exportProgress);
     $("#impBtn").addEventListener("click", () => $("#impFile").click());
     $("#impFile").addEventListener("change", importProgress);
+
+    const cfgForm = $("#syncConfigForm");
+    const cfgVal = $("#syncCfgVal");
+
+    $("#cfgSyncBtn").addEventListener("click", () => {
+      const stored = localStorage.getItem("vocabApp:v1:firebaseConfig");
+      if (stored) {
+        try {
+          cfgVal.value = JSON.stringify(JSON.parse(stored), null, 2);
+        } catch (e) {
+          cfgVal.value = stored;
+        }
+      }
+      cfgForm.style.display = cfgForm.style.display === "none" ? "block" : "none";
+    });
+
+    $("#saveSyncCfgBtn").addEventListener("click", () => {
+      let config = cfgVal.value.trim();
+      if (!config) {
+        alert("Please enter a valid Firebase Configuration JSON.");
+        return;
+      }
+      try {
+        if (config.includes("apiKey:")) {
+          config = config
+            .replace(/([a-zA-Z0-9_]+)\s*:/g, '"$1":')
+            .replace(/'/g, '"')
+            .replace(/,\s*([}\]])/g, '$1');
+        }
+        const parsed = JSON.parse(config);
+        if (!parsed.apiKey || !parsed.projectId) {
+          throw new Error("Missing apiKey or projectId");
+        }
+        localStorage.setItem("vocabApp:v1:firebaseConfig", JSON.stringify(parsed));
+        toast("Configuration saved! Reloading...", "🔑");
+        setTimeout(() => location.reload(), 1000);
+      } catch (err) {
+        alert("Error parsing config. Make sure you copy and paste the config object correctly.\n\nDetails: " + err.message);
+      }
+    });
+
+    $("#closeSyncCfgBtn").addEventListener("click", () => {
+      cfgForm.style.display = "none";
+    });
+
+    if (db) {
+      $("#testSyncBtn").addEventListener("click", () => {
+        toast("Manual sync triggered...", "🔄");
+        syncCloud(true);
+      });
+      $("#resetSyncBtn").addEventListener("click", () => {
+        if (confirm("Disconnect database sync? Your local progress will not be deleted, but cloud backups will stop.")) {
+          localStorage.removeItem("vocabApp:v1:firebaseConfig");
+          toast("Disconnected! Reloading...", "✕");
+          setTimeout(() => location.reload(), 1000);
+        }
+      });
+    }
   };
 
   function reviewsByDay(n) {
