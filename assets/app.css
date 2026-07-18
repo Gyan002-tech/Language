@@ -153,9 +153,11 @@ button { font-family: inherit; cursor: pointer; }
 .pill {
   font-size: 0.75rem; font-weight: 600; border-radius: 999px;
   padding: 0.28rem 0.7rem; border: 1px solid var(--rule); background: transparent;
-  color: var(--ink-soft);
+  color: var(--ink-soft); cursor: pointer; transition: all 0.15s ease-in-out;
 }
+.pill:hover { border-color: var(--ink-soft); color: var(--ink); }
 .pill.active { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+.pill.active:hover { color: var(--paper); background: var(--ink); }
 .pill-row { display: flex; flex-wrap: wrap; gap: 0.4rem; }
 
 .badge {
