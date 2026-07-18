@@ -1692,7 +1692,7 @@ dd.querySelectorAll(".dd-opt").forEach((o) => o.addEventListener("click", () => 
     $("#saveSyncCfgBtn").addEventListener("click", () => {
       let config = cfgVal.value.trim();
       if (!config) {
-        alert("Please enter a valid Firebase Configuration JSON.");
+        alert("Please enter a valid Firebase Configuration.");
         return;
       }
       try {
@@ -1703,13 +1703,8 @@ dd.querySelectorAll(".dd-opt").forEach((o) => o.addEventListener("click", () => 
           config = config.substring(start, end + 1);
         }
 
-        // Clean up JavaScript object notation to be strict JSON-compliant
-        config = config
-          .replace(/([a-zA-Z0-9_]+)\s*:/g, '"$1":')
-          .replace(/'/g, '"')
-          .replace(/,\s*([}\]])/g, '$1');
-
-        const parsed = JSON.parse(config);
+        // Native JS evaluation handles any quoted/unquoted keys and colons inside strings correctly
+        const parsed = new Function("return (" + config + ")")();
         if (!parsed.apiKey || !parsed.projectId) {
           throw new Error("Missing apiKey or projectId");
         }
