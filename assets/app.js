@@ -57,7 +57,7 @@
 
   /* ---------------- 3. state ---------------- */
   const GKEY = "vocabApp:v1:global";
-  let G = load(GKEY, { theme: "system", datasetId: (DATASETS[0] || {}).id, navSeen: false });
+  let G = load(GKEY, { theme: "system", datasetId: (DATASETS[0] || {}).id, navSeen: false, sessionSize: "all" });
 
   function skey(id) { return "vocabApp:v1:" + id; }
   function load(k, fallback) { try { return Object.assign({}, fallback, JSON.parse(localStorage.getItem(k)) || {}); } catch (e) { return Object.assign({}, fallback); } }
@@ -786,10 +786,12 @@
       localStorage.removeItem("lexicon_quiz_save_" + DS.id);
     }
 
-    let savedCardHtml = "";
-    if (saved && saved.queue && saved.queue.length > 0) {
-      savedCardHtml = `
-        <div class="card" style="text-align:center;margin-bottom:1.5rem;border-color:var(--accent)">
+    const hasSaved = saved && saved.queue && saved.queue.length > 0;
+    let stageContent = "";
+
+    if (hasSaved) {
+      stageContent = `
+        <div class="card" style="text-align:center;border-color:var(--accent)">
           <div style="font-size:2.6rem">💾</div>
           <div style="font-family:var(--serif);font-size:1.5rem;font-weight:700;margin:.4rem 0">Saved Session Found</div>
           <p style="color:var(--ink-soft)">You completed ${saved.done} out of ${saved.total} cards in your previous session.</p>
@@ -799,25 +801,35 @@
           </div>
         </div>
       `;
-    }
-
-    view.innerHTML = `
-      <div class="view-head"><h1>Quiz</h1><p>Spaced-repetition review. Production cards ask you to produce the word; recognition cards check meaning.</p></div>
-      <div class="quiz-stage">
-        ${savedCardHtml}
+    } else {
+      stageContent = `
         <div class="card" style="text-align:center">
           <div style="font-size:2.6rem">${due.length ? "📝" : "✅"}</div>
           <div style="font-family:var(--serif);font-size:1.5rem;font-weight:700;margin:.4rem 0">
             ${due.length ? due.length + " cards due" : "Nothing due right now"}</div>
           <p style="color:var(--ink-soft)">${due.length ? "These are scheduled for today." : "You can still study ahead in cram mode."}</p>
+          <div class="session-size-selector" style="margin:1.2rem 0;font-size:0.85rem;color:var(--ink-soft);display:flex;justify-content:center;align-items:center;gap:0.4rem">
+            <span>Session size:</span>
+            <button class="pill sm ${G.sessionSize === '10' ? 'active' : ''}" data-size="10">10</button>
+            <button class="pill sm ${G.sessionSize === '25' ? 'active' : ''}" data-size="25">25</button>
+            <button class="pill sm ${G.sessionSize === '50' ? 'active' : ''}" data-size="50">50</button>
+            <button class="pill sm ${G.sessionSize === 'all' ? 'active' : ''}" data-size="all">All</button>
+          </div>
           <div style="display:flex;gap:.6rem;justify-content:center;flex-wrap:wrap;margin-top:1rem">
             <button class="btn lg" id="startDue" ${due.length ? "" : "disabled"}>Start review</button>
             <button class="btn ghost lg" id="startCram">Cram (all cards)</button>
           </div>
         </div>
+      `;
+    }
+
+    view.innerHTML = `
+      <div class="view-head"><h1>Quiz</h1><p>Spaced-repetition review. Production cards ask you to produce the word; recognition cards check meaning.</p></div>
+      <div class="quiz-stage">
+        ${stageContent}
       </div>`;
 
-    if (saved && saved.queue && saved.queue.length > 0) {
+    if (hasSaved) {
       $("#resumeQuiz").addEventListener("click", () => {
         const reQueue = saved.queue.map((q) => {
           const found = findWord(q.word);
@@ -829,7 +841,8 @@
           done: saved.done,
           correct: saved.correct,
           total: saved.total,
-          phase: "ask"
+          phase: "ask",
+          grades: saved.grades || { easy: 0, good: 0, hard: 0, again: 0 }
         };
         route();
       });
@@ -839,14 +852,22 @@
           route();
         }
       });
+    } else {
+      view.querySelectorAll(".session-size-selector button").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          G.sessionSize = btn.dataset.size;
+          saveG();
+          route();
+        });
+      });
+      $("#startDue").addEventListener("click", () => { startQuiz(shuffle(due)); });
+      $("#startCram").addEventListener("click", () => { startQuiz(shuffle(buildDeck(content).slice())); });
     }
-
-    $("#startDue").addEventListener("click", () => { startQuiz(shuffle(due)); });
-    $("#startCram").addEventListener("click", () => { startQuiz(shuffle(buildDeck(content).slice())); });
   }
   function startQuiz(cards) {
     localStorage.removeItem("lexicon_quiz_save_" + DS.id);
-    quiz = { queue: cards.slice(), done: 0, correct: 0, total: cards.length, phase: "ask" };
+    const limit = G.sessionSize === "all" ? cards.length : parseInt(G.sessionSize, 10);
+    quiz = { queue: cards.slice(0, limit), done: 0, correct: 0, total: Math.min(cards.length, limit), phase: "ask", grades: { easy: 0, good: 0, hard: 0, again: 0 } };
     route();
   }
   function renderQuizCard(view) {
@@ -884,7 +905,8 @@
         queue: quiz.queue.map((c) => ({ id: c.id, kind: c.kind, word: c.w.word })),
         done: quiz.done,
         correct: quiz.correct,
-        total: quiz.total
+        total: quiz.total,
+        grades: quiz.grades
       };
       localStorage.setItem("lexicon_quiz_save_" + DS.id, JSON.stringify(data));
       toast("Progress saved!");
@@ -942,6 +964,7 @@
       const g = b.dataset.g;
       const wasCorrect = correct == null ? (g !== "again") : correct;
       gradeCard(card.id, g, wasCorrect);
+      if (quiz.grades) quiz.grades[g] = (quiz.grades[g] || 0) + 1;
       quiz.done++; if (wasCorrect) quiz.correct++;
       quiz.queue.shift();
       if (g === "again") quiz.queue.push(card); // requeue lapses at the end
@@ -949,10 +972,16 @@
     }));
   }
   function renderQuizSummary(view) {
-    const acc = quiz.total ? Math.round((quiz.correct / quiz.done) * 100) : 0;
+    const acc = quiz.done ? Math.round((quiz.correct / quiz.done) * 100) : 0;
     const total = quiz.total;
+    const grades = quiz.grades || { easy: 0, good: 0, hard: 0, again: 0 };
     quiz = null;
     localStorage.removeItem("lexicon_quiz_save_" + DS.id);
+
+    if (typeof confetti === "function" && acc >= 80) {
+      confetti({ particleCount: 100, spread: 70, origin: { y: 0.6 } });
+    }
+
     view.innerHTML = `
       <div class="quiz-stage">
         <div class="quiz-card">
@@ -963,6 +992,23 @@
             <div class="stat"><div class="n">${acc}%</div><div class="l">accuracy</div></div>
             <div class="stat"><div class="n">${streak()}</div><div class="l">day streak</div></div>
           </div>
+          
+          <div style="font-size: 0.85rem; color: var(--ink-soft); margin: 1.2rem 0; text-align: left; background: var(--surface-2); padding: 1rem; border-radius: var(--r)">
+            <h4 style="margin-top:0; margin-bottom:.5rem; font-family:var(--serif); color:var(--ink)">Response Breakdown</h4>
+            <div style="display:flex; justify-content:space-between; margin-bottom:.3rem">
+              <span>🟢 Easy:</span><strong>${grades.easy || 0}</strong>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-bottom:.3rem">
+              <span>🔵 Good:</span><strong>${grades.good || 0}</strong>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-bottom:.3rem">
+              <span>🟡 Hard:</span><strong>${grades.hard || 0}</strong>
+            </div>
+            <div style="display:flex; justify-content:space-between">
+              <span>🔴 Again:</span><strong>${grades.again || 0}</strong>
+            </div>
+          </div>
+
           <div style="display:flex;gap:.6rem;justify-content:center">
             <a class="btn" href="#/dashboard">Dashboard</a>
             <button class="btn ghost" id="again">Review more</button>
@@ -1430,6 +1476,7 @@ dd.querySelectorAll(".dd-opt").forEach((o) => o.addEventListener("click", () => 
     const c = counts(content);
     const last14 = reviewsByDay(14);
     const maxDay = Math.max(1, ...last14.map((d) => d.n));
+    const retention = retentionByDay(14);
     view.innerHTML = `
       <div class="view-head"><h1>Progress</h1><p>Your learning history for ${esc(DS.title)}.</p></div>
 
@@ -1440,7 +1487,7 @@ dd.querySelectorAll(".dd-opt").forEach((o) => o.addEventListener("click", () => 
         ${statTile(streak(), "day streak", "")}
       </div>
 
-      <div class="grid cols-2" style="margin-top:1rem">
+      <div class="grid cols-3" style="margin-top:1rem">
         <div class="card">
           <div class="card-lead"><h3>Mastery</h3><span style="color:var(--ink-soft);font-size:.82rem">${c.total} words</span></div>
           <div class="stacked">
@@ -1457,6 +1504,11 @@ dd.querySelectorAll(".dd-opt").forEach((o) => o.addEventListener("click", () => 
           <div class="card-lead"><h3>Reviews · last 14 days</h3></div>
           <div class="bars">${last14.map((d) => `<div class="bar ${d.n ? "" : "empty"}" style="height:${Math.max(3, (d.n / maxDay) * 100)}%" title="${d.n} on ${d.label}"></div>`).join("")}</div>
           <div class="bar-labels">${last14.map((d, i) => `<span>${i % 2 === 0 ? d.short : ""}</span>`).join("")}</div>
+        </div>
+        <div class="card">
+          <div class="card-lead"><h3>Retention · last 14 days</h3></div>
+          <div class="bars">${retention.map((d) => `<div class="bar ${d.count ? "" : "empty"}" style="height:${Math.max(3, d.rate)}%;background:var(--good)" title="${d.rate}% retention (${d.count} reviews) on ${d.label}"></div>`).join("")}</div>
+          <div class="bar-labels">${retention.map((d, i) => `<span>${i % 2 === 0 ? d.short : ""}</span>`).join("")}</div>
         </div>
       </div>
 
@@ -1494,6 +1546,24 @@ dd.querySelectorAll(".dd-opt").forEach((o) => o.addEventListener("click", () => 
     for (let i = n - 1; i >= 0; i--) {
       const t = Date.now() - i * DAY, d = new Date(t);
       out.push({ n: S.days[dayKey(t)] || 0, label: d.toLocaleDateString(), short: d.getDate() + "" });
+    }
+    return out;
+  }
+  function retentionByDay(n) {
+    const out = [];
+    const logsByDay = {};
+    (S.log || []).forEach((entry) => {
+      const k = dayKey(entry.t);
+      if (!logsByDay[k]) logsByDay[k] = { total: 0, correct: 0 };
+      logsByDay[k].total++;
+      if (entry.correct) logsByDay[k].correct++;
+    });
+    for (let i = n - 1; i >= 0; i--) {
+      const t = Date.now() - i * DAY, d = new Date(t);
+      const k = dayKey(t);
+      const dayData = logsByDay[k];
+      const rate = dayData && dayData.total ? Math.round((dayData.correct / dayData.total) * 100) : 0;
+      out.push({ rate: rate, count: dayData ? dayData.total : 0, label: d.toLocaleDateString(), short: d.getDate() + "" });
     }
     return out;
   }
