@@ -778,9 +778,33 @@
   };
   function renderQuizStart(view) {
     const due = dueCards(content);
+    const savedStr = localStorage.getItem("lexicon_quiz_save_" + DS.id);
+    let saved = null;
+    try {
+      if (savedStr) saved = JSON.parse(savedStr);
+    } catch (e) {
+      localStorage.removeItem("lexicon_quiz_save_" + DS.id);
+    }
+
+    let savedCardHtml = "";
+    if (saved && saved.queue && saved.queue.length > 0) {
+      savedCardHtml = `
+        <div class="card" style="text-align:center;margin-bottom:1.5rem;border-color:var(--accent)">
+          <div style="font-size:2.6rem">💾</div>
+          <div style="font-family:var(--serif);font-size:1.5rem;font-weight:700;margin:.4rem 0">Saved Session Found</div>
+          <p style="color:var(--ink-soft)">You completed ${saved.done} out of ${saved.total} cards in your previous session.</p>
+          <div style="display:flex;gap:.6rem;justify-content:center;flex-wrap:wrap;margin-top:1rem">
+            <button class="btn lg" id="resumeQuiz">Resume Session</button>
+            <button class="btn ghost lg" id="discardQuiz" style="color:var(--bad)">Discard Progress</button>
+          </div>
+        </div>
+      `;
+    }
+
     view.innerHTML = `
       <div class="view-head"><h1>Quiz</h1><p>Spaced-repetition review. Production cards ask you to produce the word; recognition cards check meaning.</p></div>
       <div class="quiz-stage">
+        ${savedCardHtml}
         <div class="card" style="text-align:center">
           <div style="font-size:2.6rem">${due.length ? "📝" : "✅"}</div>
           <div style="font-family:var(--serif);font-size:1.5rem;font-weight:700;margin:.4rem 0">
@@ -792,10 +816,36 @@
           </div>
         </div>
       </div>`;
-    $("#startDue").addEventListener("click", () => { startQuiz(due); });
+
+    if (saved && saved.queue && saved.queue.length > 0) {
+      $("#resumeQuiz").addEventListener("click", () => {
+        const reQueue = saved.queue.map((q) => {
+          const found = findWord(q.word);
+          return found ? { id: q.id, kind: q.kind, w: found.w } : null;
+        }).filter(c => c !== null);
+        
+        quiz = {
+          queue: reQueue,
+          done: saved.done,
+          correct: saved.correct,
+          total: saved.total,
+          phase: "ask"
+        };
+        route();
+      });
+      $("#discardQuiz").addEventListener("click", () => {
+        if (confirm("Are you sure you want to discard your saved session progress?")) {
+          localStorage.removeItem("lexicon_quiz_save_" + DS.id);
+          route();
+        }
+      });
+    }
+
+    $("#startDue").addEventListener("click", () => { startQuiz(shuffle(due)); });
     $("#startCram").addEventListener("click", () => { startQuiz(shuffle(buildDeck(content).slice())); });
   }
   function startQuiz(cards) {
+    localStorage.removeItem("lexicon_quiz_save_" + DS.id);
     quiz = { queue: cards.slice(), done: 0, correct: 0, total: cards.length, phase: "ask" };
     route();
   }
@@ -807,7 +857,7 @@
     let body;
     if (card.kind === "production") {
       const prompt = w.example && new RegExp(key, "i").test(w.example)
-        ? `<div style="font-size:1.05rem;color:var(--ink-soft);font-style:italic">“${esc(w.example.replace(new RegExp(w.word, "i"), '<span class="blank">?</span>'))}”</div><div style="margin-top:.7rem">${esc(w.meaning)}</div>`
+        ? `<div style="font-size:1.05rem;color:var(--ink-soft);font-style:italic">“${esc(w.example).replace(new RegExp(esc(w.word), "i"), '<span class="blank">?</span>')}”</div><div style="margin-top:.7rem">${esc(w.meaning)}</div>`
         : esc(w.meaning);
       body = `<div class="quiz-kind">Production — type the word</div>
         <div class="quiz-prompt">${prompt}</div>
@@ -822,12 +872,25 @@
       <div class="quiz-stage">
         <div class="quiz-topbar">
           <button class="icon-btn" id="qQuit" title="End session">✕</button>
+          <button class="icon-btn" id="qSave" title="Save progress" style="margin-left:.5rem">💾</button>
           <div class="quiz-bar"><i style="width:${progress}%"></i></div>
           <div style="font-size:.82rem;color:var(--ink-soft);white-space:nowrap">${quiz.done}/${quiz.total}</div>
         </div>
         <div class="quiz-card" id="qCard">${body}</div>
       </div>`;
     $("#qQuit").addEventListener("click", () => { quiz = null; route(); });
+    $("#qSave").addEventListener("click", () => {
+      const data = {
+        queue: quiz.queue.map((c) => ({ id: c.id, kind: c.kind, word: c.w.word })),
+        done: quiz.done,
+        correct: quiz.correct,
+        total: quiz.total
+      };
+      localStorage.setItem("lexicon_quiz_save_" + DS.id, JSON.stringify(data));
+      toast("Progress saved!");
+      quiz = null;
+      route();
+    });
     if (card.kind === "production") {
       const inp = $("#qIn"); inp.focus();
       const submit = () => checkProduction(card, inp.value);
@@ -889,6 +952,7 @@
     const acc = quiz.total ? Math.round((quiz.correct / quiz.done) * 100) : 0;
     const total = quiz.total;
     quiz = null;
+    localStorage.removeItem("lexicon_quiz_save_" + DS.id);
     view.innerHTML = `
       <div class="quiz-stage">
         <div class="quiz-card">
