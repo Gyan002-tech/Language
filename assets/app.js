@@ -1696,12 +1696,19 @@ dd.querySelectorAll(".dd-opt").forEach((o) => o.addEventListener("click", () => 
         return;
       }
       try {
-        if (config.includes("apiKey:")) {
-          config = config
-            .replace(/([a-zA-Z0-9_]+)\s*:/g, '"$1":')
-            .replace(/'/g, '"')
-            .replace(/,\s*([}\]])/g, '$1');
+        // Extract only the object braces to strip out code wrappers
+        const start = config.indexOf("{");
+        const end = config.lastIndexOf("}");
+        if (start !== -1 && end !== -1) {
+          config = config.substring(start, end + 1);
         }
+
+        // Clean up JavaScript object notation to be strict JSON-compliant
+        config = config
+          .replace(/([a-zA-Z0-9_]+)\s*:/g, '"$1":')
+          .replace(/'/g, '"')
+          .replace(/,\s*([}\]])/g, '$1');
+
         const parsed = JSON.parse(config);
         if (!parsed.apiKey || !parsed.projectId) {
           throw new Error("Missing apiKey or projectId");
